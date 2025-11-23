@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, QDate, QRect
 from PySide6.QtGui import QColor, QPainter
 
 from models.task import Task
+from .calendar_view import CalendarDialog  # 新增：引入日历视图对话框
 
 # 状态、优先级配置
 STATUS_OPTIONS = [
@@ -390,7 +391,7 @@ class MainWindow(QMainWindow):
             self,
             "关于 Requirement Timer",
             "Requirement Timer\n"
-            "版本：v1.0\n"
+            "版本：v1.2\n"
             "制作人：崔\n\n"
             "一个为策划制作的需求管理工具，基于 Python + PySide6 + SQLite 开发，"
             "帮你把策划需求推进节奏一眼看清。",
@@ -533,6 +534,7 @@ class MainWindow(QMainWindow):
         self.delete_btn = QPushButton("删除")
         self.refresh_btn = QPushButton("刷新")
         self.archive_btn = QPushButton("查看归档")
+        self.calendar_btn = QPushButton("日历视图")   # 新增按钮
         self.export_btn = QPushButton("导出 CSV（后续）")
         self.about_btn = QPushButton("关于本软件")
 
@@ -543,6 +545,7 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(self.delete_btn)
         bottom_layout.addWidget(self.refresh_btn)
         bottom_layout.addWidget(self.archive_btn)
+        bottom_layout.addWidget(self.calendar_btn)
         bottom_layout.addWidget(self.about_btn)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.export_btn)
@@ -555,6 +558,7 @@ class MainWindow(QMainWindow):
         self.delete_btn.clicked.connect(self.delete_task)
         self.refresh_btn.clicked.connect(self.load_tasks)
         self.archive_btn.clicked.connect(self.open_archive)
+        self.calendar_btn.clicked.connect(self.open_calendar)  # 新增：打开日历视图
         self.status_filter.currentIndexChanged.connect(self.load_tasks)
         self.priority_filter.currentIndexChanged.connect(self.load_tasks)
         self.about_btn.clicked.connect(self.show_about)
@@ -717,3 +721,8 @@ class MainWindow(QMainWindow):
         dlg.exec()
         # 归档变化后，主界面数量有变化，刷新一下
         self.load_tasks()
+
+    def open_calendar(self):
+        """打开日历视图"""
+        dlg = CalendarDialog(self)
+        dlg.exec()
