@@ -2,7 +2,7 @@ from datetime import datetime, date
 from typing import Optional
 
 from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QSizePolicy, QMessageBox, QDialog, QFormLayout,
     QLineEdit, QComboBox, QDateEdit, QTextEdit,
@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QPainter
 
 from models.task import Task
 
+# 状态、优先级配置
 STATUS_OPTIONS = [
     "策划中",
     "交互案",
@@ -252,13 +253,13 @@ class ArchiveDialog(QDialog):
         header.setStyleSheet("font-size: 14px; font-weight: 600; color: #111111;")
         layout.addWidget(header)
 
-        # 表格
+        # 表格：带备注列
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "标题", "模块", "版本", "状态", "优先级",
             "开始日期", "截止日期",
-            "已推进天数", "剩余天数", "进度",
+            "已推进天数", "剩余天数", "备注", "进度",
         ])
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -266,7 +267,7 @@ class ArchiveDialog(QDialog):
         self.table.verticalHeader().setVisible(False)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.verticalHeader().setDefaultSectionSize(26)
-        self.table.setItemDelegateForColumn(9, ProgressDelegate(self.table))
+        self.table.setItemDelegateForColumn(10, ProgressDelegate(self.table))
 
         layout.addWidget(self.table)
 
@@ -318,17 +319,19 @@ class ArchiveDialog(QDialog):
                 task.plan_end,
                 str(spent) if spent != "" else "",
                 left_display,
+                task.notes or "",
                 f"{progress:.0f}",
             ]
 
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
-                if col == 8:  # “剩余天数”列：已完成 → 绿色
+                # 剩余天数列：已完成 → 绿色
+                if col == 8:
                     item.setForeground(QColor("#34C759"))
                 self.table.setItem(row_idx, col, item)
 
         self.table.resizeColumnsToContents()
-        self.table.setColumnWidth(9, 140)
+        self.table.setColumnWidth(10, 140)  # 进度列宽
 
     def _get_selected_task(self) -> Optional[Task]:
         row = self.table.currentRow()
@@ -389,7 +392,8 @@ class MainWindow(QMainWindow):
             "Requirement Timer\n"
             "版本：v1.0\n"
             "制作人：崔\n\n"
-            "一个为策划制作的需求管理工具，基于 Python + PySide6 + SQLite 开发，告别拖延症和混乱的项目周期管理。",
+            "一个为策划制作的需求管理工具，基于 Python + PySide6 + SQLite 开发，"
+            "帮你把策划需求推进节奏一眼看清。",
         )
 
     def __init__(self):
@@ -500,11 +504,11 @@ class MainWindow(QMainWindow):
 
         # 中部：当前任务表格（不含已上线）
         self.table = QTableWidget()
-        self.table.setColumnCount(10)
+        self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "标题", "模块", "版本", "状态", "优先级",
             "开始日期", "截止日期",
-            "已推进天数", "剩余天数", "进度",
+            "已推进天数", "剩余天数", "备注", "进度",
         ])
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -513,7 +517,7 @@ class MainWindow(QMainWindow):
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.setSortingEnabled(False)
         self.table.verticalHeader().setDefaultSectionSize(26)
-        self.table.setItemDelegateForColumn(9, ProgressDelegate(self.table))
+        self.table.setItemDelegateForColumn(10, ProgressDelegate(self.table))
 
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
@@ -607,6 +611,7 @@ class MainWindow(QMainWindow):
                 task.plan_end,
                 str(spent) if spent != "" else "",
                 left_display,
+                task.notes or "",
                 f"{progress:.0f}" if progress is not None else "",
             ]
 
@@ -631,7 +636,7 @@ class MainWindow(QMainWindow):
             f"当前任务：{len(active_tasks)} / 归档：{len(archived_tasks)}"
         )
         self.table.resizeColumnsToContents()
-        self.table.setColumnWidth(9, 140)
+        self.table.setColumnWidth(10, 140)  # 进度条列宽
 
     @staticmethod
     def calculate_days(start_str, end_str, today=None):
