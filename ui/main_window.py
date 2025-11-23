@@ -105,7 +105,7 @@ class TaskDialog(QDialog):
         form.setVerticalSpacing(8)
 
         self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("例如：优化 Support 行为逻辑 v2")
+        self.title_edit.setPlaceholderText("例如：优化xxxx工作项 v2")
         form.addRow("标题：", self.title_edit)
 
         self.module_edit = QLineEdit()
