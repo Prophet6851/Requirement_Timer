@@ -1,5 +1,3 @@
-# db/task_repository.py
-
 from models.task import Task
 from .database import get_connection
 
