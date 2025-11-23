@@ -191,12 +191,12 @@ class TaskDialog(QDialog):
 
 
 class ArchiveDialog(QDialog):
-    """归档页面：只显示 已上线（归档） 的任务"""
+    """归档页面：显示已上线（归档）任务，并支持 移出归档 / 删除"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("归档 - 已上线需求")
-        self.resize(900, 500)
+        self.resize(900, 540)
         self.tasks: list[Task] = []
         self._build_ui()
         self.load_archived_tasks()
@@ -219,16 +219,40 @@ class ArchiveDialog(QDialog):
                 font-weight: 500;
                 color: #1C1C1E;
             }
+            QPushButton {
+                border-radius: 6px;
+                padding: 6px 16px;
+                border: 1px solid #D1D1D6;
+                background: #FFFFFF;
+                color: #1C1C1E;
+            }
+            QPushButton:hover {
+                background: #F2F2F7;
+            }
+            QPushButton#dangerButton {
+                background: #FF3B30;
+                color: white;
+                border: 1px solid #CC2D25;
+            }
+            QPushButton#dangerButton:hover {
+                background: #D8342F;
+            }
+            QPushButton#primaryButton {
+                background: #007AFF;
+                color: white;
+                border: 1px solid #0060DF;
+            }
         """)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
 
-        header = QLabel("已上线需求归档（只读）")
+        header = QLabel("已上线需求归档")
         header.setStyleSheet("font-size: 14px; font-weight: 600; color: #111111;")
         layout.addWidget(header)
 
+        # 表格
         self.table = QTableWidget()
         self.table.setColumnCount(10)
         self.table.setHorizontalHeaderLabels([
@@ -241,16 +265,34 @@ class ArchiveDialog(QDialog):
         self.table.setAlternatingRowColors(True)
         self.table.verticalHeader().setVisible(False)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.table.setSortingEnabled(False)
         self.table.verticalHeader().setDefaultSectionSize(26)
         self.table.setItemDelegateForColumn(9, ProgressDelegate(self.table))
 
         layout.addWidget(self.table)
 
+        # 按钮区域：移出归档 / 删除 / 关闭
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(10)
+
+        self.unarchive_btn = QPushButton("移出归档")
+        self.unarchive_btn.setObjectName("primaryButton")
+
+        self.delete_btn = QPushButton("删除")
+        self.delete_btn.setObjectName("dangerButton")
+
         close_btn = QPushButton("关闭")
+
+        btn_layout.addWidget(self.unarchive_btn)
+        btn_layout.addWidget(self.delete_btn)
+        btn_layout.addStretch()
+        btn_layout.addWidget(close_btn)
+
+        layout.addLayout(btn_layout)
+
+        # 信号
+        self.unarchive_btn.clicked.connect(self.unarchive_task)
+        self.delete_btn.clicked.connect(self.delete_task)
         close_btn.clicked.connect(self.accept)
-        close_btn.setFixedWidth(80)
-        layout.addWidget(close_btn, alignment=Qt.AlignRight)
 
     def load_archived_tasks(self):
         from db.task_repository import list_tasks
@@ -262,8 +304,7 @@ class ArchiveDialog(QDialog):
         today = date.today()
 
         for row_idx, task in enumerate(self.tasks):
-            spent, left = MainWindow.calculate_days(task.plan_start, task.plan_end, today)
-            # 已上线必然视为完成
+            spent, _ = MainWindow.calculate_days(task.plan_start, task.plan_end, today)
             progress = 100.0
             left_display = "已完成"
 
@@ -282,12 +323,61 @@ class ArchiveDialog(QDialog):
 
             for col, val in enumerate(values):
                 item = QTableWidgetItem(val)
-                if col == 8:  # “剩余天数”列
-                    item.setForeground(QColor("#34C759"))  # Apple 绿色
+                if col == 8:  # “剩余天数”列：已完成 → 绿色
+                    item.setForeground(QColor("#34C759"))
                 self.table.setItem(row_idx, col, item)
 
         self.table.resizeColumnsToContents()
         self.table.setColumnWidth(9, 140)
+
+    def _get_selected_task(self) -> Optional[Task]:
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self.tasks):
+            return None
+        return self.tasks[row]
+
+    def unarchive_task(self):
+        """将任务从归档恢复（默认改为 '待验收'）"""
+        task = self._get_selected_task()
+        if not task:
+            QMessageBox.information(self, "提示", "请先选中要移出的任务。")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认移出归档",
+            f"将【{task.title}】移出归档并恢复为『待验收』？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        from db.task_repository import update_task_status
+
+        update_task_status(task.id, "待验收")
+        QMessageBox.information(self, "成功", "已移出归档。")
+        self.load_archived_tasks()
+
+    def delete_task(self):
+        """删除归档中的任务"""
+        task = self._get_selected_task()
+        if not task:
+            QMessageBox.information(self, "提示", "请先选中要删除的任务。")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除【{task.title}】吗？此操作不可恢复。",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        from db.task_repository import delete_task
+        delete_task(task.id)
+        QMessageBox.information(self, "成功", "任务已删除。")
+        self.load_archived_tasks()
 
 
 class MainWindow(QMainWindow):
@@ -620,3 +710,5 @@ class MainWindow(QMainWindow):
         """打开归档页面"""
         dlg = ArchiveDialog(self)
         dlg.exec()
+        # 归档变化后，主界面数量有变化，刷新一下
+        self.load_tasks()

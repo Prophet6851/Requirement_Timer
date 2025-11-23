@@ -69,3 +69,19 @@ def delete_task(task_id: int):
     cursor.execute("DELETE FROM task WHERE id = ?", (task_id,))
     conn.commit()
     conn.close()
+
+def update_task_status(task_id: int, new_status: str):
+    """只更新任务状态（用于归档移出等场景）"""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE task
+        SET status = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        """,
+        (new_status, task_id)
+    )
+    conn.commit()
+    conn.close()
+
