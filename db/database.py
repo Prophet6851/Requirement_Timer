@@ -27,6 +27,16 @@ def init_db():
     );
     """)
 
+    # 游戏化 XP 表
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS gamification (
+        key TEXT PRIMARY KEY,
+        value INTEGER DEFAULT 0
+    );
+    """)
+    # 初始化 XP 数据
+    cursor.execute("INSERT OR IGNORE INTO gamification (key, value) VALUES ('xp', 0)")
+
     conn.commit()
     conn.close()
 

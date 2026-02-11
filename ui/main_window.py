@@ -6,13 +6,16 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QSizePolicy, QMessageBox, QDialog, QFormLayout,
     QLineEdit, QComboBox, QDateEdit, QTextEdit,
-    QDialogButtonBox, QStyledItemDelegate
+    QDialogButtonBox, QStyledItemDelegate, QProgressBar  # Added QProgressBar
 )
-from PySide6.QtCore import Qt, QDate, QRect
+from PySide6.QtCore import Qt, QDate, QRect, QPropertyAnimation, QEasingCurve  # Added Animation classes
 from PySide6.QtGui import QColor, QPainter
 
 from models.task import Task
 from .calendar_view import CalendarDialog  # 新增：引入日历视图对话框
+from utils.maxims import get_random_maxim  # 新增：导入语录工具
+# 引入 XP 相关数据库操作
+from db.task_repository import get_xp, add_xp, get_level
 
 # 状态、优先级配置
 STATUS_OPTIONS = [
@@ -407,6 +410,7 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self.load_tasks()
+        self.refresh_xp_display()  # 初始化 XP 显示
 
     # ============ UI ============
 
@@ -472,6 +476,35 @@ class MainWindow(QMainWindow):
         title_label = QLabel("Requirement Timer")
         title_label.setStyleSheet("font-size: 15px; font-weight: 600; color: #111111;")
         header_layout.addWidget(title_label)
+
+        # ---------- XP 系统 UI ----------
+        self.level_label = QLabel("Lv.1")
+        self.level_label.setStyleSheet("""
+            background: #FF9500; color: white; border-radius: 4px; padding: 2px 6px; font-weight: bold;
+        """)
+        header_layout.addWidget(self.level_label)
+
+        self.xp_bar = QProgressBar()
+        self.xp_bar.setRange(0, 1000)
+        self.xp_bar.setTextVisible(True)
+        self.xp_bar.setFormat("XP: %v / 1000")
+        self.xp_bar.setFixedWidth(150)
+        self.xp_bar.setStyleSheet("""
+            QProgressBar {
+                border: 1px solid #E5E5EA;
+                border-radius: 6px;
+                background: #FFFFFF;
+                text-align: center;
+                color: #1C1C1E;
+                font-size: 10px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FFD60A, stop:1 #FF9F0A);
+                border-radius: 5px;
+            }
+        """)
+        header_layout.addWidget(self.xp_bar)
+        # --------------------------------
 
         self.summary_label = QLabel("当前任务：0 / 归档：0")
         self.summary_label.setStyleSheet("color: #6B7280; font-size: 11px;")
@@ -551,6 +584,28 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(self.export_btn)
 
         main_layout.addLayout(bottom_layout)
+
+        # ---------------- 语录区域 (Footer) ----------------
+        self.maxim_label = QLabel()
+        self.maxim_label.setAlignment(Qt.AlignCenter)
+        self.maxim_label.setStyleSheet("""
+            QLabel {
+                color: #8E8E93;
+                font-style: italic;
+                font-size: 11px;
+                padding: 4px;
+                background: rgba(0, 0, 0, 0);
+            }
+            QLabel:hover {
+                color: #007AFF;
+                cursor: pointer;
+            }
+        """)
+        self.maxim_label.setToolTip("点击刷新灵感")
+        self.maxim_label.mousePressEvent = self.refresh_maxim  # 绑定点击事件
+
+        main_layout.addWidget(self.maxim_label)
+        self.refresh_maxim(None) # 初始化显示
 
         # 信号
         self.new_btn.clicked.connect(self.new_task)
@@ -689,13 +744,89 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "提示", "请先在列表中选中要编辑的任务。")
             return
 
+        # 记录旧状态
+        old_status = current.status
+
         dlg = TaskDialog(self, task=current)
         if dlg.exec() == QDialog.Accepted:
             from db.task_repository import update_task
             new_task = dlg.get_task()
             new_task.id = current.id
             update_task(new_task)
+
+            # 检查 XP 奖励条件：状态变为 "已上线（归档）" 且旧状态不是
+            if new_task.status == "已上线（归档）" and old_status != "已上线（归档）":
+                self.award_xp(new_task.priority)
+
             self.load_tasks()
+
+    def award_xp(self, priority: str):
+        """根据优先级计算并增加 XP，带动画"""
+        xp_map = {
+            "高": 100,
+            "中": 50,
+            "低": 20
+        }
+        amount = xp_map.get(priority, 20)
+
+        # 数据库增加
+        add_xp(amount)
+
+        # 播放动画更新 UI
+        self.animate_xp_change(amount)
+
+    def refresh_xp_display(self):
+        """读取数据库刷新 XP 显示"""
+        total_xp = get_xp()
+        level = get_level(total_xp)
+        current_level_xp = total_xp % 1000
+
+        self.level_label.setText(f"Lv.{level}")
+        self.xp_bar.setValue(current_level_xp)
+
+    def animate_xp_change(self, amount: int):
+        """XP 增加动画"""
+        start_val = self.xp_bar.value()
+        end_val = start_val + amount
+
+        # 如果升级了，动画分两段播或者直接跳过（简单处理：如果超过1000，则只能演示到1000后归零再走）
+        # 这里做一个简单的动画，如果当前 XP + increment > 1000，说明升级
+
+        current_total = get_xp() # 这已经是增加后的总值了
+        level = get_level(current_total)
+        current_xp_in_level = current_total % 1000
+
+        # 简单处理：更新等级文字，进度条从 start_val 用动画跑到 current_xp_in_level
+        # 注意：如果升级了，进度条应该是从 start_val -> 1000 (然后重置为0) -> current_xp_in_level
+        # 这里为了简化代码，直接调用 refresh_xp_display 更新文字，只给进度条做个简单动画
+
+        self.level_label.setText(f"Lv.{level}")
+
+        # 使用 QPropertyAnimation
+        self.anim = QPropertyAnimation(self.xp_bar, b"value")
+        self.anim.setDuration(800)
+        self.anim.setStartValue(start_val)
+
+        # 判断是否跨级
+        if start_val + amount >= 1000:
+            # 跨级情况：先填满
+            self.anim.setEndValue(1000)
+            self.anim.finished.connect(lambda: self._animate_next_level(current_xp_in_level))
+        else:
+            self.anim.setEndValue(current_xp_in_level)
+
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim.start()
+
+    def _animate_next_level(self, target_value):
+        """第二阶段动画（升级后）"""
+        self.xp_bar.setValue(0)
+        self.anim2 = QPropertyAnimation(self.xp_bar, b"value")
+        self.anim2.setDuration(500)
+        self.anim2.setStartValue(0)
+        self.anim2.setEndValue(target_value)
+        self.anim2.setEasingCurve(QEasingCurve.OutCubic)
+        self.anim2.start()
 
     def delete_task(self):
         current = self._get_selected_task()
@@ -726,3 +857,8 @@ class MainWindow(QMainWindow):
         """打开日历视图"""
         dlg = CalendarDialog(self)
         dlg.exec()
+
+    def refresh_maxim(self, event):
+        """随机刷新语录"""
+        maxim = get_random_maxim()
+        self.maxim_label.setText(f"💡 灵感：{maxim}")
