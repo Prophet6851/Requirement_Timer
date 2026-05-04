@@ -1,8 +1,16 @@
 import os
+import sys
 import sqlite3
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "task.db")
+if getattr(sys, 'frozen', False):
+    # 如果是打包成的 exe 运行，则将数据库存放在 exe 同级目录的 data 文件夹中，防止丢失
+    BASE_DIR = os.path.dirname(sys.executable)
+else:
+    # 源码运行，存放在项目根目录下的 data 文件夹
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+DB_PATH = os.path.join(BASE_DIR, "data", "task.db")
 
 @contextmanager
 def get_db_connection():

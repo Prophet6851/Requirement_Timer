@@ -157,7 +157,18 @@ QTabBar::tab:selected { background: #007AFF; color: #FFFFFF; }
 QToolTip { background: #1C1C1E; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 500; }
 """
 
-config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+if getattr(sys, 'frozen', False):
+    BASE_DIR = os.path.dirname(sys.executable)
+    BUNDLE_DIR = sys._MEIPASS
+else:
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    BUNDLE_DIR = BASE_DIR
+
+# 首先尝试找 exe 同级目录的 config.json，如果没有，使用打包在 exe 内部的兜底配置
+config_path = os.path.join(BASE_DIR, "config.json")
+if not os.path.exists(config_path):
+    config_path = os.path.join(BUNDLE_DIR, "config.json")
+
 try:
     with open(config_path, "r", encoding="utf-8") as f:
         config_data = json.load(f)
@@ -820,9 +831,9 @@ class MainWindow(QMainWindow):
         search_text = self.search_edit.text().strip().lower()
 
         def match(task: Task) -> bool:
-            if status_f != "全部" and task.status != status_f:
+            if status_f not in ("全部", "全部状态") and task.status != status_f:
                 return False
-            if priority_f != "全部" and task.priority != priority_f:
+            if priority_f not in ("全部", "全部优先级") and task.priority != priority_f:
                 return False
             if search_text and search_text not in task.title.lower() and search_text not in (task.notes or "").lower():
                 return False

@@ -214,14 +214,13 @@ python main.py
 使用 PyInstaller：
 
 ```
-pyinstaller --noconfirm --windowed --clean ^
+pyinstaller --noconfirm --windowed --onefile --clean ^
   --add-data "config.json;." ^
   --add-data "data;data" ^
   --icon=icon.png ^
   main.py
 ```
-> 目前项目中已经完成 EXE 打包调试，配置文件 `config.json` 支持随应用自动外发，修改无需重新打包。
-> 生成的成品环境在 `dist/main/` 目录下。
+> 目前项目中已经完成 EXE 打包调试，配置了 `--onefile` 参数，打包完成后会在 `dist/` 目录下生成单独的一个 `main.exe`，免除了大量零碎文件的困扰。配置文件 `config.json` 和内部逻辑数据库皆已集成封装支持随应用自动外发，打包极其纯净。
 
 ------
 
