@@ -1,39 +1,56 @@
 from datetime import datetime, date
 from typing import Optional
 
+import json
+import os
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QSizePolicy, QMessageBox, QDialog, QFormLayout,
     QLineEdit, QComboBox, QDateEdit, QTextEdit,
-    QDialogButtonBox, QStyledItemDelegate, QProgressBar  # Added QProgressBar
+    QDialogButtonBox, QStyledItemDelegate, QProgressBar, QTabWidget, QTextBrowser, QStackedWidget, QScrollArea, QFrame
 )
-from PySide6.QtCore import Qt, QDate, QRect, QPropertyAnimation, QEasingCurve  # Added Animation classes
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import Qt, QDate, QRect, QPropertyAnimation, QEasingCurve, QMimeData, QPoint
+from PySide6.QtGui import QColor, QPainter, QDrag
 
 from models.task import Task
 from .calendar_view import CalendarDialog  # 新增：引入日历视图对话框
+from .dashboard_view import DashboardDialog # 新增仪表盘
 from utils.maxims import get_random_maxim  # 新增：导入语录工具
 # 引入 XP 相关数据库操作
 from db.task_repository import get_xp, add_xp, get_level
 
-# 状态、优先级配置
-STATUS_OPTIONS = [
-    "策划中",
-    "交互案",
-    "美术",
-    "开发中",
-    "待验收",
-    "验收完",
-    "测试回归bug",
-    "已上线（归档）",
-]
+config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+try:
+    with open(config_path, "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+        STATUS_OPTIONS = config_data.get("STATUS_OPTIONS", [])
+        PRIORITY_OPTIONS = config_data.get("PRIORITY_OPTIONS", [])
+        COMPLETED_STATUSES = config_data.get("COMPLETED_STATUSES", [])
+        XP_MAP = config_data.get("XP_MAP", {})
+except Exception as e:
+    # 状态、优先级配置
+    STATUS_OPTIONS = [
+        "策划中",
+        "交互案",
+        "美术",
+        "开发中",
+        "待验收",
+        "验收完",
+        "测试回归bug",
+        "已上线（归档）",
+    ]
 
-PRIORITY_OPTIONS = ["高", "中", "低"]
+    PRIORITY_OPTIONS = ["高", "中", "低"]
 
-# 这些状态都视为“已完成”
-COMPLETED_STATUSES = ["验收完", "测试回归bug", "已上线（归档）"]
-
+    # 这些状态都视为“已完成”
+    COMPLETED_STATUSES = ["验收完", "测试回归bug", "已上线（归档）"]
+    XP_MAP = {
+        "高": 100,
+        "中": 50,
+        "低": 20
+    }
 
 class ProgressDelegate(QStyledItemDelegate):
     """表格里显示扁平进度条（Apple 风格：浅灰底 + 蓝色条 + 白字）"""
@@ -140,10 +157,19 @@ class TaskDialog(QDialog):
         self.end_date_edit.setDate(QDate.currentDate())
         form.addRow("截止日期：", self.end_date_edit)
 
+        self.notes_tabs = QTabWidget()
         self.notes_edit = QTextEdit()
-        self.notes_edit.setPlaceholderText("备注：依赖项、沟通记录、注意事项等……")
-        self.notes_edit.setFixedHeight(120)
-        form.addRow("备注：", self.notes_edit)
+        self.notes_edit.setPlaceholderText("备注：支持 Markdown 格式，记录依赖项、沟通记录等……")
+
+        self.notes_preview = QTextBrowser()
+        self.notes_preview.setOpenExternalLinks(True)
+
+        self.notes_tabs.addTab(self.notes_edit, "编辑")
+        self.notes_tabs.addTab(self.notes_preview, "预览")
+        self.notes_tabs.currentChanged.connect(self._update_markdown_preview)
+
+        self.notes_tabs.setFixedHeight(150)
+        form.addRow("备注：", self.notes_tabs)
 
         layout.addLayout(form)
 
@@ -166,6 +192,17 @@ class TaskDialog(QDialog):
         self._set_date_safe(self.start_date_edit, task.plan_start)
         self._set_date_safe(self.end_date_edit, task.plan_end)
         self.notes_edit.setPlainText(task.notes or "")
+        self._update_markdown_preview(0)
+
+    def _update_markdown_preview(self, index):
+        if index == 1:
+            try:
+                import markdown
+                text = self.notes_edit.toPlainText()
+                html = markdown.markdown(text, extensions=['tables', 'fenced_code'])
+                self.notes_preview.setHtml(html)
+            except ImportError:
+                self.notes_preview.setHtml("<p><i>未安装 markdown 库，无法预览。</i></p>" + self.notes_edit.toPlainText().replace('\n', '<br>'))
 
     @staticmethod
     def _set_date_safe(widget: QDateEdit, s: str):
@@ -469,7 +506,7 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(8, 8, 8, 8)
         main_layout.setSpacing(6)
 
-        # 顶部条：标题 + 统计 + 筛选
+        # 顶部条：标题 + 统计 + 筛选 + 搜索
         header_layout = QHBoxLayout()
         header_layout.setSpacing(6)
 
@@ -512,6 +549,11 @@ class MainWindow(QMainWindow):
 
         header_layout.addStretch()
 
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("搜索任务...")
+        self.search_edit.setFixedWidth(150)
+        header_layout.addWidget(self.search_edit)
+
         status_label = QLabel("状态：")
         status_label.setStyleSheet("font-size: 11px;")
         self.status_filter = QComboBox()
@@ -529,12 +571,18 @@ class MainWindow(QMainWindow):
         self.priority_filter.addItems(PRIORITY_OPTIONS)
         self.priority_filter.setFixedWidth(100)
 
+        self.toggle_view_btn = QPushButton("看板/列表")
+        self.toggle_view_btn.setFixedWidth(80)
+
         header_layout.addWidget(status_label)
         header_layout.addWidget(self.status_filter)
         header_layout.addWidget(priority_label)
         header_layout.addWidget(self.priority_filter)
+        header_layout.addWidget(self.toggle_view_btn)
 
         main_layout.addLayout(header_layout)
+
+        self.stacked_widget = QStackedWidget()
 
         # 中部：当前任务表格（不含已上线）
         self.table = QTableWidget()
@@ -556,7 +604,19 @@ class MainWindow(QMainWindow):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(True)
 
-        main_layout.addWidget(self.table)
+        self.stacked_widget.addWidget(self.table)
+
+        # KanBan View Placeholder
+        self.kanban_widget = QWidget()
+        self.kanban_layout = QHBoxLayout(self.kanban_widget)
+        self.kanban_layout.setAlignment(Qt.AlignLeft)
+        # Adding scroll area for kanban
+        self.kanban_scroll = QScrollArea()
+        self.kanban_scroll.setWidgetResizable(True)
+        self.kanban_scroll.setWidget(self.kanban_widget)
+        self.stacked_widget.addWidget(self.kanban_scroll)
+
+        main_layout.addWidget(self.stacked_widget)
 
         # 底部：操作按钮
         bottom_layout = QHBoxLayout()
@@ -568,7 +628,8 @@ class MainWindow(QMainWindow):
         self.refresh_btn = QPushButton("刷新")
         self.archive_btn = QPushButton("查看归档")
         self.calendar_btn = QPushButton("日历视图")   # 新增按钮
-        self.export_btn = QPushButton("导出 CSV（后续）")
+        self.dashboard_btn = QPushButton("数据仪表盘")
+        self.export_btn = QPushButton("导出 CSV")
         self.about_btn = QPushButton("关于本软件")
 
         self.new_btn.setObjectName("primaryButton")
@@ -579,6 +640,7 @@ class MainWindow(QMainWindow):
         bottom_layout.addWidget(self.refresh_btn)
         bottom_layout.addWidget(self.archive_btn)
         bottom_layout.addWidget(self.calendar_btn)
+        bottom_layout.addWidget(self.dashboard_btn)
         bottom_layout.addWidget(self.about_btn)
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.export_btn)
@@ -614,11 +676,18 @@ class MainWindow(QMainWindow):
         self.refresh_btn.clicked.connect(self.load_tasks)
         self.archive_btn.clicked.connect(self.open_archive)
         self.calendar_btn.clicked.connect(self.open_calendar)  # 新增：打开日历视图
+        self.dashboard_btn.clicked.connect(self.open_dashboard)
+        self.export_btn.clicked.connect(self.export_to_csv)
         self.status_filter.currentIndexChanged.connect(self.load_tasks)
         self.priority_filter.currentIndexChanged.connect(self.load_tasks)
+        self.search_edit.textChanged.connect(self.load_tasks)
+        self.toggle_view_btn.clicked.connect(self.toggle_view)
         self.about_btn.clicked.connect(self.show_about)
 
-    # ============ 数据加载 ============
+    # ============ 鏁版嵁鍔犺浇 ============
+    def toggle_view(self):
+        idx = self.stacked_widget.currentIndex()
+        self.stacked_widget.setCurrentIndex(1 if idx == 0 else 0)
 
     def load_tasks(self):
         """当前页面：只显示 非 已上线（归档） 的任务；逾期/已完成显示规则更新"""
@@ -630,11 +699,14 @@ class MainWindow(QMainWindow):
 
         status_f = self.status_filter.currentText()
         priority_f = self.priority_filter.currentText()
+        search_text = self.search_edit.text().strip().lower()
 
         def match(task: Task) -> bool:
             if status_f != "全部" and task.status != status_f:
                 return False
             if priority_f != "全部" and task.priority != priority_f:
+                return False
+            if search_text and search_text not in task.title.lower() and search_text not in (task.notes or "").lower():
                 return False
             return True
 
@@ -696,6 +768,49 @@ class MainWindow(QMainWindow):
         )
         self.table.resizeColumnsToContents()
         self.table.setColumnWidth(10, 140)  # 进度条列宽
+        self.update_kanban_view()
+
+    def update_kanban_view(self):
+        # 清除现有列
+        for i in reversed(range(self.kanban_layout.count())):
+            widget = self.kanban_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+
+        # 这里选择几个核心状态作为列，避免太挤
+        columns = ["策划中", "开发中", "待验收", "验收完", "测试回归bug"]
+
+        for col_status in columns:
+            col_widget = QWidget()
+            col_widget.setFixedWidth(240)
+            col_widget.setStyleSheet("background: #F2F2F7; border-radius: 8px;")
+            col_v_layout = QVBoxLayout(col_widget)
+            col_v_layout.setAlignment(Qt.AlignTop)
+
+            title_lbl = QLabel(col_status)
+            title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1C1C1E; margin-bottom: 5px;")
+            col_v_layout.addWidget(title_lbl)
+
+            col_tasks = [t for t in self.tasks if t.status == col_status]
+            for t in col_tasks:
+                card = QFrame()
+                card.setStyleSheet("background: white; border: 1px solid #D1D1D6; border-radius: 6px; padding: 6px;")
+                clayout = QVBoxLayout(card)
+                clayout.setContentsMargins(5, 5, 5, 5)
+
+                t_lbl = QLabel(t.title)
+                t_lbl.setWordWrap(True)
+                t_lbl.setStyleSheet("font-weight: bold; color: #007AFF; border:none;")
+                clayout.addWidget(t_lbl)
+
+                desc_lbl = QLabel(f"{t.module} | {t.priority}")
+                desc_lbl.setStyleSheet("color: #6B7280; font-size: 10px; border:none;")
+                clayout.addWidget(desc_lbl)
+
+                col_v_layout.addWidget(card)
+
+            self.kanban_layout.addWidget(col_widget)
+
 
     @staticmethod
     def calculate_days(start_str, end_str, today=None):
@@ -762,12 +877,7 @@ class MainWindow(QMainWindow):
 
     def award_xp(self, priority: str):
         """根据优先级计算并增加 XP，带动画"""
-        xp_map = {
-            "高": 100,
-            "中": 50,
-            "低": 20
-        }
-        amount = xp_map.get(priority, 20)
+        amount = XP_MAP.get(priority, 20)
 
         # 数据库增加
         add_xp(amount)
@@ -857,6 +967,44 @@ class MainWindow(QMainWindow):
         """打开日历视图"""
         dlg = CalendarDialog(self)
         dlg.exec()
+
+    def open_dashboard(self):
+        """打开仪表盘"""
+        dlg = DashboardDialog(self)
+        dlg.exec()
+
+    def export_to_csv(self):
+        """导出任务到 CSV文件"""
+        import csv
+        from PySide6.QtWidgets import QFileDialog
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "导出 CSV", "", "CSV Files (*.csv);;All Files (*)"
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, mode="w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.writer(f)
+                writer.writerow(["标题", "模块", "版本", "状态", "优先级", "开始日期", "截止日期", "备注"])
+
+                from db.task_repository import list_tasks
+                all_tasks = list_tasks()
+                for task in all_tasks:
+                    writer.writerow([
+                        task.title,
+                        task.module,
+                        task.version,
+                        task.status,
+                        task.priority,
+                        task.plan_start,
+                        task.plan_end,
+                        task.notes
+                    ])
+            QMessageBox.information(self, "成功", f"成功导出到 {file_path}")
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"导出失败: {e}")
 
     def refresh_maxim(self, event):
         """随机刷新语录"""
