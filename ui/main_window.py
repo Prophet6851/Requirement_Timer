@@ -1,25 +1,161 @@
 from datetime import datetime, date
 from typing import Optional
 
-import json
+import sys
 import os
+
+# 如果直接运行此文件，将父目录加入路径以支持导入
+if __name__ == "__main__":
+    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+import json
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QPushButton, QLabel,
     QSizePolicy, QMessageBox, QDialog, QFormLayout,
     QLineEdit, QComboBox, QDateEdit, QTextEdit,
-    QDialogButtonBox, QStyledItemDelegate, QProgressBar, QTabWidget, QTextBrowser, QStackedWidget, QScrollArea, QFrame
+    QDialogButtonBox, QStyledItemDelegate, QProgressBar, QTabWidget, QTextBrowser, QStackedWidget, QScrollArea, QFrame, QGraphicsDropShadowEffect
 )
 from PySide6.QtCore import Qt, QDate, QRect, QPropertyAnimation, QEasingCurve, QMimeData, QPoint
 from PySide6.QtGui import QColor, QPainter, QDrag
 
 from models.task import Task
-from .calendar_view import CalendarDialog  # 新增：引入日历视图对话框
-from .dashboard_view import DashboardDialog # 新增仪表盘
+
+try:
+    from .calendar_view import CalendarDialog
+    from .dashboard_view import DashboardDialog
+except ImportError:
+    from ui.calendar_view import CalendarDialog
+    from ui.dashboard_view import DashboardDialog
+
 from utils.maxims import get_random_maxim  # 新增：导入语录工具
 # 引入 XP 相关数据库操作
 from db.task_repository import get_xp, add_xp, get_level
+
+GLOBAL_QSS = """
+* { 
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; 
+    outline: none; 
+}
+QMainWindow, QDialog, QWidget#kanban_widget { background: #FFFFFF; }
+QFrame#sidebar { background: #F5F5F7; border-right: 1px solid #E5E5EA; }
+QWidget#contentArea { background: #FFFFFF; }
+QLabel#appTitle { font-size: 22px; font-weight: 800; color: #111111; padding-bottom: 10px; }
+QLabel#pageTitle { font-size: 24px; font-weight: 700; color: #1C1C1E; }
+QPushButton#navButton { text-align: left; padding: 10px 14px; border-radius: 8px; font-size: 14px; font-weight: 600; color: #3A3A3C; background: transparent; border: none; margin-bottom: 4px; }
+QPushButton#navButton:hover { background: #EBEBF0; }
+QPushButton#navButton:checked { background: #E5F1FF; color: #007AFF; }
+
+/* ======== Modern Inputs ======== */
+QLineEdit, QTextEdit, QTextBrowser { 
+    background: #F2F2F7; border: 1px solid transparent; border-radius: 8px; 
+    padding: 8px 12px; font-size: 13px; color: #1C1C1E; 
+    selection-background-color: #007AFF; selection-color: #FFFFFF; 
+}
+QLineEdit:hover, QTextEdit:hover { background: #EBEBF0; border: 1px solid transparent; }
+QLineEdit:focus, QTextEdit:focus { background: #FFFFFF; border: 1px solid #007AFF; }
+
+/* ======== ComboBoxes & DateEdits (Dropdowns) ======== */
+QComboBox, QDateEdit { 
+    background: #F2F2F7; border: 1px solid transparent; border-radius: 8px; 
+    padding: 8px 24px 8px 12px; /* Reduce right padding to avoid clipping text */
+    font-size: 13px; color: #1C1C1E; 
+}
+QComboBox:hover, QDateEdit:hover { background: #EBEBF0; border: 1px solid transparent; }
+QComboBox:focus, QDateEdit:focus { background: #FFFFFF; border: 1px solid #007AFF; }
+
+QComboBox::drop-down, QDateEdit::drop-down { 
+    subcontrol-origin: padding; subcontrol-position: center right; 
+    width: 24px; border-left: none; background: transparent; 
+}
+/* 绘制独立向下的 SVG 箭头 */
+QComboBox::down-arrow { 
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'></polyline></svg>");
+    width: 16px; height: 16px;
+}
+/* 日期控件的下拉绘制一个日历 Icon */
+QDateEdit::down-arrow {
+    image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238E8E93' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='18' height='18' rx='2' ry='2'></rect><line x1='16' y1='2' x2='16' y2='6'></line><line x1='8' y1='2' x2='8' y2='6'></line><line x1='3' y1='10' x2='21' y2='10'></line></svg>");
+    width: 16px; height: 16px;
+}
+
+QComboBox QAbstractItemView { 
+    background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 8px; 
+    selection-background-color: #F2F2F7; selection-color: #007AFF; outline: none; padding: 4px; 
+}
+QComboBox QAbstractItemView::item { min-height: 36px; border-radius: 6px; padding: 6px 12px; color: #1C1C1E; }
+QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected { 
+    background-color: #E5F1FF; color: #007AFF; font-weight: bold; 
+}
+
+/* ======== Calendar Popup ======== */
+QCalendarWidget QWidget#qt_calendar_navigationbar { background-color: #F5F5F7; border-bottom: 1px solid #E5E5EA; min-height: 35px; }
+QCalendarWidget QToolButton { color: #1C1C1E; font-weight: 600; background: transparent; border-radius: 6px; padding: 4px 8px; }
+QCalendarWidget QToolButton:hover { background-color: #E5E5EA; }
+QCalendarWidget QMenu { background-color: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 8px; }
+QCalendarWidget QSpinBox { background: transparent; border: none; }
+QCalendarWidget QAbstractItemView:enabled { background-color: #FFFFFF; selection-background-color: #007AFF; selection-color: #FFFFFF; }
+QCalendarWidget QAbstractItemView:disabled { color: #C7C7CC; }
+
+/* ======== Buttons ======== */
+QPushButton { 
+    border-radius: 8px; padding: 8px 18px; background: #FFFFFF; color: #1C1C1E; 
+    font-size: 13px; font-weight: 600; border: 1px solid #E5E5EA; 
+}
+QPushButton:hover { background: #F2F2F7; border-color: #D1D1D6; color: #111111; }
+QPushButton:pressed { background: #E5E5EA; }
+QPushButton#primaryButton { background: #007AFF; color: #FFFFFF; border: none; }
+QPushButton#primaryButton:hover { background: #0066D6; }
+QPushButton#primaryButton:pressed { background: #0052B3; }
+QPushButton#dangerButton { background: #FF3B30; color: #FFFFFF; border: none; }
+QPushButton#dangerButton:hover { background: #E0352B; }
+QPushButton#dangerButton:pressed { background: #B22822; }
+
+/* ======== Table ======== */
+QTableWidget { 
+    background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 12px; 
+    gridline-color: transparent; alternate-background-color: #FAFAFC; 
+    selection-background-color: #F5F5F7; selection-color: #000000; outline: none; 
+}
+QTableWidget::item { border-bottom: 1px solid #F5F5F7; padding: 8px 4px; }
+QHeaderView { background: transparent; }
+QHeaderView::section { 
+    background: #FFFFFF; padding: 12px 8px; border: none; 
+    border-bottom: 1px solid #E5E5EA; font-weight: 600; color: #8E8E93; font-size: 12px; 
+}
+
+/* ======== Progress Bar ======== */
+QProgressBar { border: none; border-radius: 6px; background: #E5E5EA; text-align: center; color: #1C1C1E; font-size: 10px; font-weight: bold; }
+QProgressBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #007AFF, stop:1 #34C759); border-radius: 6px; }
+QProgressBar#xpBar::chunk { background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FFD60A, stop:1 #FF9500); }
+
+/* ======== Form Layout in Dialogs ======== */
+QFormLayout { spacing: 16px; }
+
+/* ======== Scrollbars ======== */
+QScrollBar:vertical, QScrollBar:horizontal { 
+    border: none; background: transparent; width: 12px; height: 12px; 
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal { 
+    background: #D1D1D6; border-radius: 6px; min-height: 24px; min-width: 24px; margin: 2px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover { background: #AEAEB2; }
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page { border: none; background: none; }
+
+/* ======== Tabs ======== */
+QTabWidget::pane { border: none; background: transparent; margin-top: 8px; }
+QTabBar { outline: none; }
+QTabBar::tab { 
+    background: #F2F2F7; color: #8E8E93; padding: 8px 24px; 
+    border-radius: 8px; margin-right: 8px; font-weight: 600; font-size: 13px; border: none; 
+}
+QTabBar::tab:hover { background: #E5E5EA; color: #1C1C1E; }
+QTabBar::tab:selected { background: #007AFF; color: #FFFFFF; }
+
+/* ======== ToolTip ======== */
+QToolTip { background: #1C1C1E; color: #FFFFFF; border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 500; }
+"""
 
 config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
 try:
@@ -113,10 +249,11 @@ class TaskDialog(QDialog):
             self._fill_from_task(task)
 
     def _build_ui(self):
-        self.setMinimumWidth(480)
+        self.setMinimumWidth(500)
+        self.setStyleSheet(GLOBAL_QSS)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 12)
+        layout.setContentsMargins(24, 24, 24, 20)
         layout.setSpacing(10)
 
         form = QFormLayout()
@@ -244,51 +381,11 @@ class ArchiveDialog(QDialog):
         self.load_archived_tasks()
 
     def _build_ui(self):
-        self.setStyleSheet("""
-            QDialog {
-                background: #F5F5F7;
-            }
-            QTableWidget {
-                background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                gridline-color: #E5E5EA;
-                alternate-background-color: #F9F9FB;
-            }
-            QHeaderView::section {
-                background: #F2F2F7;
-                padding: 6px;
-                border: none;
-                font-weight: 500;
-                color: #1C1C1E;
-            }
-            QPushButton {
-                border-radius: 6px;
-                padding: 6px 16px;
-                border: 1px solid #D1D1D6;
-                background: #FFFFFF;
-                color: #1C1C1E;
-            }
-            QPushButton:hover {
-                background: #F2F2F7;
-            }
-            QPushButton#dangerButton {
-                background: #FF3B30;
-                color: white;
-                border: 1px solid #CC2D25;
-            }
-            QPushButton#dangerButton:hover {
-                background: #D8342F;
-            }
-            QPushButton#primaryButton {
-                background: #007AFF;
-                color: white;
-                border: 1px solid #0060DF;
-            }
-        """)
+        self.setStyleSheet(GLOBAL_QSS)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
         header = QLabel("已上线需求归档")
         header.setStyleSheet("font-size: 14px; font-weight: 600; color: #111111;")
@@ -441,7 +538,7 @@ class MainWindow(QMainWindow):
         super().__init__()
 
         self.setWindowTitle("Requirement Timer - 需求时间管理")
-        self.resize(1100, 650)
+        self.resize(1200, 750)
 
         self.tasks: list[Task] = []
 
@@ -455,142 +552,150 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
 
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #F5F5F7;
-            }
-            QTableWidget {
-                background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                gridline-color: #E5E5EA;
-                alternate-background-color: #F9F9FB;
-            }
-            QHeaderView::section {
-                background: #F2F2F7;
-                padding: 6px;
-                border: none;
-                font-weight: 500;
-                color: #1C1C1E;
-            }
-            QLineEdit, QComboBox, QDateEdit, QTextEdit {
-                background: #FFFFFF;
-                border: 1px solid #D1D1D6;
-                border-radius: 6px;
-                padding: 4px 8px;
-            }
-            QLineEdit:focus, QComboBox:focus, QDateEdit:focus, QTextEdit:focus {
-                border: 1px solid #007AFF;
-                box-shadow: 0 0 0 1px rgba(0,122,255,0.15);
-            }
-            QPushButton {
-                border-radius: 6px;
-                padding: 6px 16px;
-                border: 1px solid #D1D1D6;
-                background: #FFFFFF;
-                color: #1C1C1E;
-            }
-            QPushButton:hover {
-                background: #F2F2F7;
-            }
-            QPushButton#primaryButton {
-                background: #007AFF;
-                color: #FFFFFF;
-                border: 1px solid #0060DF;
-            }
-            QPushButton#primaryButton:hover {
-                background: #0059D6;
-            }
-        """)
+        self.setStyleSheet(GLOBAL_QSS)
 
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(8, 8, 8, 8)
-        main_layout.setSpacing(6)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # 顶部条：标题 + 统计 + 筛选 + 搜索
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(6)
+        # ================= Sidebar =================
+        self.sidebar = QFrame()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(240)
+        sidebar_layout = QVBoxLayout(self.sidebar)
+        sidebar_layout.setContentsMargins(20, 30, 20, 24)
+        sidebar_layout.setSpacing(8)
 
-        title_label = QLabel("Requirement Timer")
-        title_label.setStyleSheet("font-size: 15px; font-weight: 600; color: #111111;")
-        header_layout.addWidget(title_label)
+        app_title = QLabel("需求时间管理器")
+        app_title.setObjectName("appTitle")
+        sidebar_layout.addWidget(app_title)
+        sidebar_layout.addSpacing(20)
 
-        # ---------- XP 系统 UI ----------
+        # Nav Buttons
+        self.nav_list_btn = QPushButton("📋  任务列表")
+        self.nav_kanban_btn = QPushButton("🗂️  敏捷看板")
+        self.nav_dashboard_btn = QPushButton("📊  统计仪表盘")
+        self.nav_calendar_btn = QPushButton("📅  日历视图")
+        self.nav_archive_btn = QPushButton("📦  项目归档")
+
+        self.nav_buttons = [
+            self.nav_list_btn, self.nav_kanban_btn,
+            self.nav_dashboard_btn, self.nav_calendar_btn, self.nav_archive_btn
+        ]
+
+        for i, btn in enumerate(self.nav_buttons):
+            btn.setObjectName("navButton")
+            btn.setCheckable(True)
+            # Connect using closure inside lambda
+            btn.clicked.connect(lambda checked, idx=i: self.switch_nav(idx))
+            sidebar_layout.addWidget(btn)
+
+        self.nav_list_btn.setChecked(True)
+
+        sidebar_layout.addStretch()
+
+        # Levels and XP in Sidebar
+        xp_container = QFrame()
+        xp_container.setStyleSheet("background: #FFFFFF; border-radius: 12px; padding: 12px;")
+        xp_layout = QVBoxLayout(xp_container)
+        xp_layout.setContentsMargins(0,0,0,0)
+
+        level_header_layout = QHBoxLayout()
+        lvl_title = QLabel("项目成长")
+        lvl_title.setStyleSheet("font-size: 11px; font-weight: bold; color: #8E8E93;")
         self.level_label = QLabel("Lv.1")
-        self.level_label.setStyleSheet("""
-            background: #FF9500; color: white; border-radius: 4px; padding: 2px 6px; font-weight: bold;
-        """)
-        header_layout.addWidget(self.level_label)
+        self.level_label.setStyleSheet("color: #FF9500; font-weight: 800; font-size: 14px;")
+        level_header_layout.addWidget(lvl_title)
+        level_header_layout.addStretch()
+        level_header_layout.addWidget(self.level_label)
 
         self.xp_bar = QProgressBar()
+        self.xp_bar.setObjectName("xpBar")
         self.xp_bar.setRange(0, 1000)
-        self.xp_bar.setTextVisible(True)
-        self.xp_bar.setFormat("XP: %v / 1000")
-        self.xp_bar.setFixedWidth(150)
-        self.xp_bar.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #E5E5EA;
-                border-radius: 6px;
-                background: #FFFFFF;
-                text-align: center;
-                color: #1C1C1E;
-                font-size: 10px;
-            }
-            QProgressBar::chunk {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FFD60A, stop:1 #FF9F0A);
-                border-radius: 5px;
-            }
-        """)
-        header_layout.addWidget(self.xp_bar)
-        # --------------------------------
+        self.xp_bar.setTextVisible(False)
+        self.xp_bar.setFixedHeight(12)
+
+        self.xp_text = QLabel("0 / 1000 XP")
+        self.xp_text.setAlignment(Qt.AlignCenter)
+        self.xp_text.setStyleSheet("font-size: 10px; color: #8E8E93; margin-top: 4px;")
+
+        xp_layout.addLayout(level_header_layout)
+        xp_layout.addWidget(self.xp_bar)
+        xp_layout.addWidget(self.xp_text)
+
+        sidebar_layout.addWidget(xp_container)
+
+        # Bottom tools
+        self.about_btn = QPushButton("ℹ️ 关于软件")
+        self.about_btn.setObjectName("navButton")
+        self.about_btn.clicked.connect(self.show_about)
+        sidebar_layout.addWidget(self.about_btn)
+
+        main_layout.addWidget(self.sidebar)
+
+        # ================= Content Area =================
+        self.content_area = QWidget()
+        self.content_area.setObjectName("contentArea")
+        content_layout = QVBoxLayout(self.content_area)
+        content_layout.setContentsMargins(32, 28, 32, 24)
+        content_layout.setSpacing(20)
+
+        # Top Bar
+        top_bar_layout = QHBoxLayout()
+
+        self.page_title = QLabel("任务列表")
+        self.page_title.setObjectName("pageTitle")
+        top_bar_layout.addWidget(self.page_title)
 
         self.summary_label = QLabel("当前任务：0 / 归档：0")
-        self.summary_label.setStyleSheet("color: #6B7280; font-size: 11px;")
-        header_layout.addWidget(self.summary_label)
+        self.summary_label.setStyleSheet("color: #8E8E93; font-size: 12px; font-weight: 500; margin-left: 10px;")
+        top_bar_layout.addWidget(self.summary_label)
 
-        header_layout.addStretch()
+        top_bar_layout.addStretch()
 
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("搜索任务...")
-        self.search_edit.setFixedWidth(150)
-        header_layout.addWidget(self.search_edit)
+        self.search_edit.setPlaceholderText("🔍 搜索任务...")
+        self.search_edit.setFixedWidth(200)
 
-        status_label = QLabel("状态：")
-        status_label.setStyleSheet("font-size: 11px;")
         self.status_filter = QComboBox()
-        self.status_filter.addItem("全部")
-        # 过滤器这里不包含“已上线（归档）”，因为那是归档页面
+        self.status_filter.addItem("全部状态")
         for s in STATUS_OPTIONS:
             if s != "已上线（归档）":
                 self.status_filter.addItem(s)
-        self.status_filter.setFixedWidth(130)
+        self.status_filter.setFixedWidth(150)
 
-        priority_label = QLabel("优先级：")
-        priority_label.setStyleSheet("font-size: 11px;")
         self.priority_filter = QComboBox()
-        self.priority_filter.addItem("全部")
+        self.priority_filter.addItem("全部优先级")
         self.priority_filter.addItems(PRIORITY_OPTIONS)
-        self.priority_filter.setFixedWidth(100)
+        self.priority_filter.setFixedWidth(140)
 
-        self.toggle_view_btn = QPushButton("看板/列表")
-        self.toggle_view_btn.setFixedWidth(80)
+        self.new_btn = QPushButton("➕ 新建任务")
+        self.new_btn.setObjectName("primaryButton")
+        self.new_btn.setFixedWidth(120)
 
-        header_layout.addWidget(status_label)
-        header_layout.addWidget(self.status_filter)
-        header_layout.addWidget(priority_label)
-        header_layout.addWidget(self.priority_filter)
-        header_layout.addWidget(self.toggle_view_btn)
+        top_bar_layout.addWidget(self.search_edit)
+        top_bar_layout.addWidget(self.status_filter)
+        top_bar_layout.addWidget(self.priority_filter)
+        top_bar_layout.addSpacing(16)
+        top_bar_layout.addWidget(self.new_btn)
 
-        main_layout.addLayout(header_layout)
+        content_layout.addLayout(top_bar_layout)
 
+        # Stacked Widget (List vs Kanban)
         self.stacked_widget = QStackedWidget()
 
-        # 中部：当前任务表格（不含已上线）
+        # View 0: Table
+        table_container = QWidget()
+        table_layout = QVBoxLayout(table_container)
+        table_layout.setContentsMargins(0,0,0,0)
+        table_layout.setSpacing(12)
+
         self.table = QTableWidget()
         self.table.setColumnCount(11)
         self.table.setHorizontalHeaderLabels([
             "标题", "模块", "版本", "状态", "优先级",
             "开始日期", "截止日期",
-            "已推进天数", "剩余天数", "备注", "进度",
+            "推进", "剩余天数", "备注", "进度",
         ])
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -598,75 +703,65 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().setVisible(False)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.setSortingEnabled(False)
-        self.table.verticalHeader().setDefaultSectionSize(26)
+        self.table.verticalHeader().setDefaultSectionSize(40)
         self.table.setItemDelegateForColumn(10, ProgressDelegate(self.table))
+        self.table.horizontalHeader().setStretchLastSection(True)
 
-        header = self.table.horizontalHeader()
-        header.setStretchLastSection(True)
+        # Table Action tools
+        table_actions_layout = QHBoxLayout()
+        self.edit_btn = QPushButton("✏️ 编辑选中")
+        self.delete_btn = QPushButton("🗑️ 删除")
+        self.delete_btn.setObjectName("dangerButton")
+        self.refresh_btn = QPushButton("🔄 刷新")
+        self.export_btn = QPushButton("📤 导出 CSV")
 
-        self.stacked_widget.addWidget(self.table)
+        table_actions_layout.addWidget(self.edit_btn)
+        table_actions_layout.addWidget(self.delete_btn)
+        table_actions_layout.addWidget(self.refresh_btn)
+        table_actions_layout.addStretch()
+        table_actions_layout.addWidget(self.export_btn)
 
-        # KanBan View Placeholder
+        table_layout.addWidget(self.table)
+        table_layout.addLayout(table_actions_layout)
+
+        self.stacked_widget.addWidget(table_container)  # Index 0
+
+        # View 1: Kanban View Placeholder
         self.kanban_widget = QWidget()
+        self.kanban_widget.setObjectName("kanban_widget")
         self.kanban_layout = QHBoxLayout(self.kanban_widget)
         self.kanban_layout.setAlignment(Qt.AlignLeft)
-        # Adding scroll area for kanban
+
         self.kanban_scroll = QScrollArea()
         self.kanban_scroll.setWidgetResizable(True)
         self.kanban_scroll.setWidget(self.kanban_widget)
-        self.stacked_widget.addWidget(self.kanban_scroll)
+        self.kanban_scroll.setObjectName("kanban_scroll")
 
-        main_layout.addWidget(self.stacked_widget)
+        self.stacked_widget.addWidget(self.kanban_scroll) # Index 1
 
-        # 底部：操作按钮
-        bottom_layout = QHBoxLayout()
-        bottom_layout.setSpacing(8)
+        content_layout.addWidget(self.stacked_widget)
 
-        self.new_btn = QPushButton("新建")
-        self.edit_btn = QPushButton("编辑")
-        self.delete_btn = QPushButton("删除")
-        self.refresh_btn = QPushButton("刷新")
-        self.archive_btn = QPushButton("查看归档")
-        self.calendar_btn = QPushButton("日历视图")   # 新增按钮
-        self.dashboard_btn = QPushButton("数据仪表盘")
-        self.export_btn = QPushButton("导出 CSV")
-        self.about_btn = QPushButton("关于本软件")
-
-        self.new_btn.setObjectName("primaryButton")
-
-        bottom_layout.addWidget(self.new_btn)
-        bottom_layout.addWidget(self.edit_btn)
-        bottom_layout.addWidget(self.delete_btn)
-        bottom_layout.addWidget(self.refresh_btn)
-        bottom_layout.addWidget(self.archive_btn)
-        bottom_layout.addWidget(self.calendar_btn)
-        bottom_layout.addWidget(self.dashboard_btn)
-        bottom_layout.addWidget(self.about_btn)
-        bottom_layout.addStretch()
-        bottom_layout.addWidget(self.export_btn)
-
-        main_layout.addLayout(bottom_layout)
-
-        # ---------------- 语录区域 (Footer) ----------------
+        # Maxim Footer
         self.maxim_label = QLabel()
         self.maxim_label.setAlignment(Qt.AlignCenter)
         self.maxim_label.setStyleSheet("""
             QLabel {
-                color: #8E8E93;
-                font-style: italic;
-                font-size: 11px;
-                padding: 4px;
-                background: rgba(0, 0, 0, 0);
+                color: #A1A1A6;
+                font-size: 12px;
+                font-weight: 500;
+                margin-top: 10px;
             }
             QLabel:hover {
                 color: #007AFF;
-                cursor: pointer;
             }
         """)
         self.maxim_label.setToolTip("点击刷新灵感")
         self.maxim_label.mousePressEvent = self.refresh_maxim  # 绑定点击事件
 
-        main_layout.addWidget(self.maxim_label)
+        content_layout.addWidget(self.maxim_label)
+
+        main_layout.addWidget(self.content_area)
+
         self.refresh_maxim(None) # 初始化显示
 
         # 信号
@@ -674,21 +769,44 @@ class MainWindow(QMainWindow):
         self.edit_btn.clicked.connect(self.edit_task)
         self.delete_btn.clicked.connect(self.delete_task)
         self.refresh_btn.clicked.connect(self.load_tasks)
-        self.archive_btn.clicked.connect(self.open_archive)
-        self.calendar_btn.clicked.connect(self.open_calendar)  # 新增：打开日历视图
-        self.dashboard_btn.clicked.connect(self.open_dashboard)
         self.export_btn.clicked.connect(self.export_to_csv)
         self.status_filter.currentIndexChanged.connect(self.load_tasks)
         self.priority_filter.currentIndexChanged.connect(self.load_tasks)
         self.search_edit.textChanged.connect(self.load_tasks)
-        self.toggle_view_btn.clicked.connect(self.toggle_view)
-        self.about_btn.clicked.connect(self.show_about)
 
-    # ============ 鏁版嵁鍔犺浇 ============
-    def toggle_view(self):
-        idx = self.stacked_widget.currentIndex()
-        self.stacked_widget.setCurrentIndex(1 if idx == 0 else 0)
+    # ============ 导航逻辑 ============
+    def switch_nav(self, index):
+        # Prevent unchecking the activated item
+        for i, btn in enumerate(self.nav_buttons):
+            btn.setChecked(i == index)
 
+        self.stacked_widget.setCurrentIndex(0) # Default jump back to table if needed
+
+        if index == 0:
+            self.page_title.setText("任务列表")
+            self.stacked_widget.setCurrentIndex(0)
+            self._set_filters_visible(True)
+        elif index == 1:
+            self.page_title.setText("敏捷看板")
+            self.stacked_widget.setCurrentIndex(1)
+            self._set_filters_visible(True)
+        elif index == 2:
+            self.open_dashboard()
+            # restore nav state
+            self.switch_nav(0)
+        elif index == 3:
+            self.open_calendar()
+            self.switch_nav(0)
+        elif index == 4:
+            self.open_archive()
+            self.switch_nav(0)
+
+    def _set_filters_visible(self, visible: bool):
+        self.search_edit.setVisible(visible)
+        self.status_filter.setVisible(visible)
+        self.priority_filter.setVisible(visible)
+
+    # ============ 数据加载 ============
     def load_tasks(self):
         """当前页面：只显示 非 已上线（归档） 的任务；逾期/已完成显示规则更新"""
         from db.task_repository import list_tasks
@@ -777,35 +895,83 @@ class MainWindow(QMainWindow):
             if widget:
                 widget.setParent(None)
 
-        # 这里选择几个核心状态作为列，避免太挤
         columns = ["策划中", "开发中", "待验收", "验收完", "测试回归bug"]
 
         for col_status in columns:
             col_widget = QWidget()
-            col_widget.setFixedWidth(240)
-            col_widget.setStyleSheet("background: #F2F2F7; border-radius: 8px;")
+            col_widget.setFixedWidth(280)
+            col_widget.setStyleSheet("background: #F5F5F7; border-radius: 12px; margin-right: 12px;")
             col_v_layout = QVBoxLayout(col_widget)
             col_v_layout.setAlignment(Qt.AlignTop)
-
-            title_lbl = QLabel(col_status)
-            title_lbl.setStyleSheet("font-weight: bold; font-size: 13px; color: #1C1C1E; margin-bottom: 5px;")
-            col_v_layout.addWidget(title_lbl)
+            col_v_layout.setContentsMargins(14, 16, 14, 16)
+            col_v_layout.setSpacing(12)
 
             col_tasks = [t for t in self.tasks if t.status == col_status]
+
+            # Header
+            header_layout = QHBoxLayout()
+            title_lbl = QLabel(col_status)
+            title_lbl.setStyleSheet("font-weight: 700; font-size: 15px; color: #111111; border: none; background: transparent;")
+            count_lbl = QLabel(str(len(col_tasks)))
+            count_lbl.setStyleSheet("font-weight: 600; font-size: 12px; color: #8E8E93; background: #E5E5EA; padding: 2px 8px; border-radius: 10px;")
+
+            header_layout.addWidget(title_lbl)
+            header_layout.addStretch()
+            header_layout.addWidget(count_lbl)
+            col_v_layout.addLayout(header_layout)
+
             for t in col_tasks:
                 card = QFrame()
-                card.setStyleSheet("background: white; border: 1px solid #D1D1D6; border-radius: 6px; padding: 6px;")
+                card.setStyleSheet("""
+                    QFrame {
+                        background: #FFFFFF;
+                        border: 1px solid #E5E5EA;
+                        border-radius: 10px;
+                    }
+                    QFrame:hover {
+                        border: 1px solid #D1D1D6;
+                    }
+                """)
+
+                shadow = QGraphicsDropShadowEffect()
+                shadow.setBlurRadius(15)
+                shadow.setColor(QColor(0, 0, 0, 10))
+                shadow.setOffset(0, 4)
+                card.setGraphicsEffect(shadow)
+
                 clayout = QVBoxLayout(card)
-                clayout.setContentsMargins(5, 5, 5, 5)
+                clayout.setContentsMargins(14, 14, 14, 14)
+                clayout.setSpacing(8)
 
                 t_lbl = QLabel(t.title)
                 t_lbl.setWordWrap(True)
-                t_lbl.setStyleSheet("font-weight: bold; color: #007AFF; border:none;")
+                t_lbl.setStyleSheet("font-weight: 600; font-size: 14px; color: #111111; background: transparent; border: none;")
                 clayout.addWidget(t_lbl)
 
-                desc_lbl = QLabel(f"{t.module} | {t.priority}")
-                desc_lbl.setStyleSheet("color: #6B7280; font-size: 10px; border:none;")
-                clayout.addWidget(desc_lbl)
+                desc_h_layout = QHBoxLayout()
+                desc_h_layout.setSpacing(6)
+
+                if t.module:
+                    mod_lbl = QLabel(t.module)
+                    mod_lbl.setStyleSheet("color: #007AFF; font-size: 11px; font-weight: 600; background: #E5F1FF; padding: 3px 8px; border-radius: 6px; border: none;")
+                    desc_h_layout.addWidget(mod_lbl)
+
+                pri_color = "#FF3B30" if t.priority == "高" else ("#FF9500" if t.priority == "中" else "#34C759")
+                pri_bg = "#FFEBEA" if t.priority == "高" else ("#FFF4E5" if t.priority == "中" else "#EAF9ED")
+                pri_lbl = QLabel(t.priority)
+                pri_lbl.setStyleSheet(f"color: {pri_color}; font-size: 11px; font-weight: 600; background: {pri_bg}; padding: 3px 8px; border-radius: 6px; border: none;")
+                desc_h_layout.addWidget(pri_lbl)
+
+                desc_h_layout.addStretch()
+                clayout.addLayout(desc_h_layout)
+
+                # Bottom info (date/time)
+                btm_layout = QHBoxLayout()
+                date_lbl = QLabel(f"🕐 {t.plan_end}" if t.plan_end else "未定")
+                date_lbl.setStyleSheet("color: #8E8E93; font-size: 11px; border: none;")
+                btm_layout.addWidget(date_lbl)
+                btm_layout.addStretch()
+                clayout.addLayout(btm_layout)
 
                 col_v_layout.addWidget(card)
 
@@ -893,6 +1059,7 @@ class MainWindow(QMainWindow):
 
         self.level_label.setText(f"Lv.{level}")
         self.xp_bar.setValue(current_level_xp)
+        self.xp_text.setText(f"{current_level_xp} / 1000 XP")
 
     def animate_xp_change(self, amount: int):
         """XP 增加动画"""
@@ -911,6 +1078,7 @@ class MainWindow(QMainWindow):
         # 这里为了简化代码，直接调用 refresh_xp_display 更新文字，只给进度条做个简单动画
 
         self.level_label.setText(f"Lv.{level}")
+        self.xp_text.setText(f"{current_xp_in_level} / 1000 XP")
 
         # 使用 QPropertyAnimation
         self.anim = QPropertyAnimation(self.xp_bar, b"value")
@@ -1010,3 +1178,11 @@ class MainWindow(QMainWindow):
         """随机刷新语录"""
         maxim = get_random_maxim()
         self.maxim_label.setText(f"💡 灵感：{maxim}")
+
+if __name__ == "__main__":
+    from PySide6.QtWidgets import QApplication
+    app = QApplication(sys.argv)
+    app.setStyleSheet(GLOBAL_QSS)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
